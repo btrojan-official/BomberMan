@@ -1,2 +1,2 @@
 # BomberMan
- Simple online game made with PHP and WebSockets
+2D Online Game made with PHP and WebSockets!
