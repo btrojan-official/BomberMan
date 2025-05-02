@@ -22,7 +22,7 @@
 
     function init() {
       websocket.onopen = function (ev) { // connection is open
-        //console.log("open");
+        console.log("open");
       }
 
       //#### Message received from server
@@ -32,13 +32,13 @@
             var msg = JSON.parse(ev.data); //PHP sends Json data
             console.log(msg);
           } catch (error) {
-            //console.error(error);
-            //console.log(ev.data);
+            console.error(error);
+            console.log(ev.data);
           }
       };
 
       websocket.onerror = function (ev) {
-        //  console.log(ev.data);
+        console.log(ev.data);
       };
     };
 	</script>
