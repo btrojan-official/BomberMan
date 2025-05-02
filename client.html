@@ -4,43 +4,177 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>Document</title>
+	<title>BomberMan Game</title>
+	<style>
+		canvas {
+			border: 1px solid black;
+		}
+	</style>
 	<script>
-    let wsUri = "ws://localhost:46089/server.php";
-    websocket = new WebSocket(wsUri);
+		let wsUri = "ws://localhost:46089/server.php";
+		websocket = new WebSocket(wsUri);
+		const canvas = document.createElement('canvas');
+		const ctx = canvas.getContext('2d');
+		const scalar = 1;
+		const CELL_SIZE = 20 * scalar; // Size of each cell in pixels
+		const WALL_COLORS = {
+			0: '#4CAF50', // Floor
+			1: '#795548', // Undestructable wall
+			2: '#8D6E63'  // Destructable wall
+		};
 
-    function send() {
-        if (websocket.readyState === WebSocket.OPEN) {
-            var msg = {
-              test2: "Hello!"
-            };
-            websocket.send(JSON.stringify(msg));
-        } else {
-        console.log('WebSocket is not open. Cannot send message.');
-        }
-    }
+		// Add keyboard state tracking
+		const keys = {
+			up: false,
+			down: false,
+			left: false,
+			right: false
+		};
 
-    function init() {
-      websocket.onopen = function (ev) { // connection is open
-        console.log("open");
-      }
+		function init() {
+			// Set canvas size based on game field dimensions
+			canvas.width = 31 * CELL_SIZE;
+			canvas.height = 13 * CELL_SIZE;
+			document.body.appendChild(canvas);
 
-      //#### Message received from server
-      websocket.onmessage = function (ev) {
-        if (ev.data != "")
-          try {
-            var msg = JSON.parse(ev.data); //PHP sends Json data
-            console.log(msg);
-          } catch (error) {
-            console.error(error);
-            console.log(ev.data);
-          }
-      };
+			// Add keyboard event listeners
+			document.addEventListener('keydown', handleKeyDown);
+			document.addEventListener('keyup', handleKeyUp);
 
-      websocket.onerror = function (ev) {
-        console.log(ev.data);
-      };
-    };
+			websocket.onopen = function (ev) {
+				console.log("open");
+			}
+
+			websocket.onmessage = function (ev) {
+				if (ev.data != "") {
+					try {
+						var msg = JSON.parse(ev.data);
+						if (msg.game) {
+							const gameData = JSON.parse(msg.game);
+							drawGame(gameData);
+						} else{
+							console.log(msg);
+						}
+					} catch (error) {
+						console.error(error);
+						console.log(ev.data);
+					}
+				}
+			};
+
+			websocket.onerror = function (ev) {
+				console.log(ev.data);
+			};
+		}
+
+		function drawGame(gameData) {
+			// Clear canvas
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+			// Draw game field
+			const gameField = gameData.gameField;
+			for (let i = 0; i < gameField.length; i++) {
+				for (let j = 0; j < gameField[i].length; j++) {
+					const cellType = gameField[i][j];
+					ctx.fillStyle = WALL_COLORS[cellType];
+					ctx.fillRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+					ctx.strokeStyle = '#000';
+					ctx.strokeRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+				}
+			}
+
+			// Draw player
+			const player = gameData.player;
+			ctx.fillStyle = '#2196F3';
+			ctx.beginPath();
+			ctx.arc(
+				player.x,
+				player.y,
+				CELL_SIZE/2,
+				0,
+				Math.PI * 2
+			);
+			ctx.fill();
+
+			// Draw opponents
+			const opponents = gameData.opponents;
+			ctx.fillStyle = '#F44336';
+			opponents.forEach(opponent => {
+				ctx.beginPath();
+				ctx.arc(
+					opponent.x,
+					opponent.y,
+					CELL_SIZE/2,
+					0,
+					Math.PI * 2
+				);
+				ctx.fill();
+			});
+		}
+
+		function send() {
+			if (websocket.readyState === WebSocket.OPEN) {
+				var msg = {
+					test2: "Hello!"
+				};
+				websocket.send(JSON.stringify(msg));
+			} else {
+				console.log('WebSocket is not open. Cannot send message.');
+			}
+		}
+
+		function handleKeyDown(e) {
+			switch(e.key.toLowerCase()) {
+				case 'w':
+				case 'arrowup':
+					keys.up = true;
+					break;
+				case 's':
+				case 'arrowdown':
+					keys.down = true;
+					break;
+				case 'a':
+				case 'arrowleft':
+					keys.left = true;
+					break;
+				case 'd':
+				case 'arrowright':
+					keys.right = true;
+					break;
+			}
+			sendMovement();
+		}
+
+		function handleKeyUp(e) {
+			switch(e.key.toLowerCase()) {
+				case 'w':
+				case 'arrowup':
+					keys.up = false;
+					break;
+				case 's':
+				case 'arrowdown':
+					keys.down = false;
+					break;
+				case 'a':
+				case 'arrowleft':
+					keys.left = false;
+					break;
+				case 'd':
+				case 'arrowright':
+					keys.right = false;
+					break;
+			}
+			sendMovement();
+		}
+
+		function sendMovement() {
+			if (websocket.readyState === WebSocket.OPEN) {
+				var msg = {
+					movement: keys
+				};
+				websocket.send(JSON.stringify(msg));
+			}
+		}
 	</script>
 </head>
 

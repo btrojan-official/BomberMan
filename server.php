@@ -1,4 +1,6 @@
 <?php
+require_once 'game.php';
+
 $host = 'localhost'; // moja domena w ct8.pl
 $port = 46089; // zarezerwowany w panelu port
 $transport = 'http';
@@ -10,22 +12,7 @@ $clients = array($server); // tablica klientów
 $write  = NULL;
 $except = NULL;
 
-// Game field - 13x31 array
-$gameField = array(
-    array(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1),
-    array(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-    array(1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1),
-    array(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-    array(1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1),
-    array(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-    array(1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1),
-    array(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-    array(1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1),
-    array(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-    array(1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1),
-    array(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1),
-    array(1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1)
-);
+$game = new Game();
 
 echo "Server is running on port: $port\n";
 while (true) {
@@ -48,7 +35,7 @@ while (true) {
 
         $data=[
             "status" => "connected",
-            "gameField" => $gameField
+            "game" => $game->getGameJSON()
         ];
 
         send_message($clients, mask(json_encode($data))); //połączenie -> aktualne dane
@@ -72,6 +59,10 @@ while (true) {
       
         $unmasked = unmask($buffer);
         if ($unmasked != "") {
+            $data = json_decode($unmasked, true);
+            if (isset($data['movement'])) {
+                $game->handlePlayerMovement($data['movement']);
+            }
             echo "\nReceived a Message from $ip:\n\"$unmasked\" \n";
         }
       
@@ -85,7 +76,9 @@ while (true) {
         }
     }
 
-    send_message($clients, mask(json_encode(["msg"=>"tick"])));
+    send_message($clients, mask(json_encode([
+        "game" => $game->getGameJSON()
+    ])));
 }
 fclose($server);
 
