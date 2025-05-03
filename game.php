@@ -86,6 +86,25 @@ class Game {
         return 1; // Return wall value if coordinates are out of bounds
     }
 
+    public function updatePlayerPosition(array $position): void {
+        $newX = $position['x'];
+        $newY = $position['y'];
+        
+        $radius = 9;
+
+        // Check if all corners of the player (radius = 10) are walkable
+        $topLeft = $this->getSquareValue($newX - $radius, $newY - $radius);
+        $topRight = $this->getSquareValue($newX + $radius, $newY - $radius);
+        $bottomLeft = $this->getSquareValue($newX - $radius, $newY + $radius);
+        $bottomRight = $this->getSquareValue($newX + $radius, $newY + $radius);
+
+        // Update player position only if all corners are walkable (value 0)
+        if ($topLeft == 0 && $topRight == 0 && $bottomLeft == 0 && $bottomRight == 0) {
+            $this->player->setX($newX);
+            $this->player->setY($newY);
+        }
+    }
+
     public function handlePlayerMovement(array $movement): void {
         $speed = 5; // Adjust this value to control movement speed
         $playerX = $this->player->getX();
@@ -123,5 +142,11 @@ class Game {
         }
 
         echo $topLeft == 0 && $topRight == 0 && $bottomLeft == 0 && $bottomRight == 0 ? "true" : "false";
+    }
+
+    public function moveOpponents(): void {
+        foreach ($this->opponents as $opponent) {
+            $opponent->moveOpponent($this->gameField);
+        }
     }
 }
