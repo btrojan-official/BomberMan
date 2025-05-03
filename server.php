@@ -13,13 +13,31 @@ $write  = NULL;
 $except = NULL;
 
 $game = new Game();
+$lastClientMessage = []; // Track last message time for each client
 
 echo "Server is running on port: $port\n";
+
+// Add timer for opponent movement
+$lastOpponentMove = microtime(true);
+$opponentMoveInterval = 1; // Move opponents every 0.5 seconds
+
 while (true) {
     $changed = $clients;
-    stream_select($changed, $write, $except, 4); // 4s - TICKI!!!!!
+    stream_select($changed, $write, $except, 0, 10000); // Add 10ms delay to prevent CPU overuse
  
-	if (in_array($server, $changed)) {
+    // Check if it's time to move opponents
+    $currentTime = microtime(true);
+    if ($currentTime - $lastOpponentMove >= $opponentMoveInterval) {
+        $game->moveOpponents();
+        $lastOpponentMove = $currentTime;
+        
+        // Send game state to all clients after opponent movement
+        send_message($clients, mask(json_encode([
+            "game" => $game->getGameJSON()
+        ])));
+    }
+
+    if (in_array($server, $changed)) {
         $client = @stream_socket_accept($server);
         if (!$client) {
             continue;
@@ -55,13 +73,18 @@ while (true) {
             @fclose($changed_socket);
             $found_socket = array_search($changed_socket, $clients);
             unset($clients[$found_socket]);
+            unset($lastClientMessage[$ip]); // Clean up rate limiter data
         }
       
         $unmasked = unmask($buffer);
         if ($unmasked != "") {
             $data = json_decode($unmasked, true);
-            if (isset($data['movement'])) {
-                $game->handlePlayerMovement($data['movement']);
+            if (isset($data['position'])) {
+                // Rate limiting - only process position updates every 0.1 seconds
+                if (!isset($lastClientMessage[$ip]) || ($currentTime - $lastClientMessage[$ip]) >= 0.1) {
+                    $game->updatePlayerPosition($data['position']);
+                    $lastClientMessage[$ip] = $currentTime;
+                }
             }
             echo "\nReceived a Message from $ip:\n\"$unmasked\" \n";
         }
@@ -75,10 +98,6 @@ while (true) {
             send_message($clients, $response);
         }
     }
-
-    send_message($clients, mask(json_encode([
-        "game" => $game->getGameJSON()
-    ])));
 }
 fclose($server);
 

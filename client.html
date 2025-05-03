@@ -31,6 +31,22 @@
 			right: false
 		};
 
+		// Add player position and movement speed
+		const player = {
+			x: CELL_SIZE * 1.5, // Start at cell (1,1)
+			y: CELL_SIZE * 1.5,
+			speed: 2 * scalar
+		};
+
+		// Add opponent tracking
+		let previousOpponents = [];
+		let currentOpponents = [];
+		let opponentAnimations = [];
+		const ANIMATION_DURATION = 1000; // 0.5 seconds
+		const GAME_LOOP_INTERVAL = 10; // 10 times per second
+		const POSITION_UPDATE_INTERVAL = 100; // Send position updates every 100ms
+		let lastPositionUpdate = 0;
+
 		function init() {
 			// Set canvas size based on game field dimensions
 			canvas.width = 31 * CELL_SIZE;
@@ -41,6 +57,9 @@
 			document.addEventListener('keydown', handleKeyDown);
 			document.addEventListener('keyup', handleKeyUp);
 
+			// Start game loop
+			setInterval(gameLoop, GAME_LOOP_INTERVAL);
+
 			websocket.onopen = function (ev) {
 				console.log("open");
 			}
@@ -49,11 +68,14 @@
 				if (ev.data != "") {
 					try {
 						var msg = JSON.parse(ev.data);
-						if (msg.game) {
+						if (msg.type === "ping") {
+							// Send pong response
+							websocket.send(JSON.stringify({ type: "pong" }));
+						} else if (msg.game) {
 							const gameData = JSON.parse(msg.game);
-							drawGame(gameData);
+							updateGameState(gameData);
 						} else{
-							console.log(msg);
+							// console.log(msg);
 						}
 					} catch (error) {
 						console.error(error);
@@ -65,14 +87,203 @@
 			websocket.onerror = function (ev) {
 				console.log(ev.data);
 			};
+
+			// Add connection monitoring
+			let lastPongTime = Date.now();
+			const connectionCheckInterval = setInterval(() => {
+				if (Date.now() - lastPongTime > 10000) { // 10 seconds without pong
+					console.log("Connection lost, attempting to reconnect...");
+					websocket.close();
+					websocket = new WebSocket(wsUri);
+					lastPongTime = Date.now();
+				}
+			}, 5000); // Check every 5 seconds
 		}
 
-		function drawGame(gameData) {
+		function updateGameState(gameData) {
+			// Store current opponents as previous
+			previousOpponents = [...currentOpponents];
+			currentOpponents = gameData.opponents;
+
+			// Update animations for each opponent
+			opponentAnimations = currentOpponents.map((opponent, index) => {
+				const prevOpponent = previousOpponents[index];
+				if (!prevOpponent) return null;
+
+				// Check if position changed
+				if (prevOpponent.x !== opponent.x || prevOpponent.y !== opponent.y) {
+					return {
+						startX: prevOpponent.x,
+						startY: prevOpponent.y,
+						endX: opponent.x,
+						endY: opponent.y,
+						startTime: Date.now(),
+						duration: ANIMATION_DURATION
+					};
+				}
+				return null;
+			});
+		}
+
+		function gameLoop() {
+			updatePlayerPosition();
+			drawGame();
+		}
+
+		function updatePlayerPosition() {
+			// Calculate movement based on keys pressed
+			let dx = 0;
+			let dy = 0;
+			
+			if (keys.up) dy -= player.speed;
+			if (keys.down) dy += player.speed;
+			if (keys.left) dx -= player.speed;
+			if (keys.right) dx += player.speed;
+
+			// Get the game field and check if it's properly initialized
+			const gameField = currentGameData?.gameField;
+			if (!gameField || !Array.isArray(gameField) || gameField.length === 0 || !Array.isArray(gameField[0])) {
+				// If game field is not properly initialized, don't update position
+				return;
+			}
+			
+			// Calculate potential new position
+			const newX = player.x + dx;
+			const newY = player.y + dy;
+
+			// Calculate all four corners of the player (19x19 pixels)
+			const playerSize = 19;
+			const corners = [
+				{ x: newX - playerSize/2, y: newY - playerSize/2 }, // top-left
+				{ x: newX + playerSize/2, y: newY - playerSize/2 }, // top-right
+				{ x: newX - playerSize/2, y: newY + playerSize/2 }, // bottom-left
+				{ x: newX + playerSize/2, y: newY + playerSize/2 }  // bottom-right
+			];
+
+			// Check if all corners are within bounds and on floor tiles
+			let canMove = true;
+			let invalidCorners = [];
+			let validCorners = [];
+
+			for (const corner of corners) {
+				const gridX = Math.floor(corner.x / CELL_SIZE);
+				const gridY = Math.floor(corner.y / CELL_SIZE);
+
+				if (gridX < 0 || gridX >= gameField[0].length || 
+					gridY < 0 || gridY >= gameField.length || 
+					gameField[gridY][gridX] !== 0) {
+					invalidCorners.push(corner);
+				} else {
+					validCorners.push(corner);
+				}
+			}
+
+			// If we have both valid and invalid corners, try to correct the position
+			if (invalidCorners.length > 0 && validCorners.length >= 3) {
+				// Try moving the invalid corner in different directions
+				let corner = invalidCorners[0];
+				const maxCorrectionLength = 10;
+				let validCorrection = null;
+				
+				// Try each direction with increasing correction lengths
+				for (let correctionLength = 1; correctionLength <= maxCorrectionLength; correctionLength++) {
+					// Only try corrections that aren't opposite to movement direction
+					console.log("corr leng: ", correctionLength);
+					console.log("dx: ", dx);	
+					console.log("dy: ", dy);
+
+					const corrections = [];
+					if (dx == 0) corrections.push({x: correctionLength, y: 0}); // right
+					if (dx == 0) corrections.push({x: -correctionLength, y: 0}); // left
+					if (dy == 0) corrections.push({x: 0, y: correctionLength}); // down
+					if (dy == 0) corrections.push({x: 0, y: -correctionLength}); // up
+					
+					// Test each correction
+					for (const correction of corrections) {
+						const testX = newX + correction.x;
+						const testY = newY + correction.y;
+						
+						// Check if this correction keeps all valid corners valid
+						// and makes the invalid corner valid
+						let allCornersValid = true;
+						
+						// Check invalid corner in new position
+						const invalidGridX = Math.floor((corner.x + correction.x) / CELL_SIZE);
+						const invalidGridY = Math.floor((corner.y + correction.y) / CELL_SIZE);
+						
+						if (invalidGridX < 0 || invalidGridX >= gameField[0].length ||
+							invalidGridY < 0 || invalidGridY >= gameField.length ||
+							gameField[invalidGridY][invalidGridX] !== 0) {
+							continue;
+						}
+						
+						// Check all valid corners in new position
+						for (const validCorner of validCorners) {
+							const validGridX = Math.floor((validCorner.x + correction.x) / CELL_SIZE);
+							const validGridY = Math.floor((validCorner.y + correction.y) / CELL_SIZE);
+							
+							if (validGridX < 0 || validGridX >= gameField[0].length ||
+								validGridY < 0 || validGridY >= gameField.length ||
+								gameField[validGridY][validGridX] !== 0) {
+								allCornersValid = false;
+								break;
+							}
+						}
+						
+						if (allCornersValid) {
+							validCorrection = correction;
+							break;
+						}
+					}
+					
+					if (validCorrection) {
+						break; // Found a valid correction, no need to try larger corrections
+					}
+				}
+				
+				if (validCorrection) {
+					console.log(validCorrection);
+					
+					player.x = newX + validCorrection.x;
+					player.y = newY + validCorrection.y;
+				}
+			} else if (invalidCorners.length === 0) {
+				// All corners are valid, move normally
+				player.x = newX;
+				player.y = newY;
+			} else {
+				// All corners are invalid, don't move
+				canMove = false;
+			}
+
+			// Send position update if we moved
+			if (canMove) {
+				const currentTime = Date.now();
+				if (currentTime - lastPositionUpdate >= POSITION_UPDATE_INTERVAL) {
+					sendPositionUpdate();
+					lastPositionUpdate = currentTime;
+				}
+			}
+		}
+
+		function sendPositionUpdate() {
+			if (websocket.readyState === WebSocket.OPEN) {
+				var msg = {
+					position: {
+						x: player.x,
+						y: player.y
+					}
+				};
+				websocket.send(JSON.stringify(msg));
+			}
+		}
+
+		function drawGame() {
 			// Clear canvas
 			ctx.clearRect(0, 0, canvas.width, canvas.height);
 
 			// Draw game field
-			const gameField = gameData.gameField;
+			const gameField = currentGameData?.gameField || [];
 			for (let i = 0; i < gameField.length; i++) {
 				for (let j = 0; j < gameField[i].length; j++) {
 					const cellType = gameField[i][j];
@@ -84,7 +295,6 @@
 			}
 
 			// Draw player
-			const player = gameData.player;
 			ctx.fillStyle = '#2196F3';
 			ctx.beginPath();
 			ctx.arc(
@@ -96,14 +306,30 @@
 			);
 			ctx.fill();
 
-			// Draw opponents
-			const opponents = gameData.opponents;
+			// Draw opponents with animation
 			ctx.fillStyle = '#F44336';
-			opponents.forEach(opponent => {
+			currentOpponents.forEach((opponent, index) => {
+				let x = opponent.x;
+				let y = opponent.y;
+
+				// Apply animation if exists
+				const animation = opponentAnimations[index];
+				if (animation) {
+					const elapsed = Date.now() - animation.startTime;
+					if (elapsed < animation.duration) {
+						const progress = elapsed / animation.duration;
+						x = animation.startX + (animation.endX - animation.startX) * progress;
+						y = animation.startY + (animation.endY - animation.startY) * progress;
+					} else {
+						// Animation complete
+						opponentAnimations[index] = null;
+					}
+				}
+
 				ctx.beginPath();
 				ctx.arc(
-					opponent.x,
-					opponent.y,
+					x,
+					y,
 					CELL_SIZE/2,
 					0,
 					Math.PI * 2
@@ -112,15 +338,33 @@
 			});
 		}
 
-		function send() {
-			if (websocket.readyState === WebSocket.OPEN) {
-				var msg = {
-					test2: "Hello!"
-				};
-				websocket.send(JSON.stringify(msg));
-			} else {
-				console.log('WebSocket is not open. Cannot send message.');
-			}
+		// Store current game data
+		let currentGameData = null;
+
+		function updateGameState(gameData) {
+			currentGameData = gameData;
+			// Store current opponents as previous
+			previousOpponents = [...currentOpponents];
+			currentOpponents = gameData.opponents;
+
+			// Update animations for each opponent
+			opponentAnimations = currentOpponents.map((opponent, index) => {
+				const prevOpponent = previousOpponents[index];
+				if (!prevOpponent) return null;
+
+				// Check if position changed
+				if (prevOpponent.x !== opponent.x || prevOpponent.y !== opponent.y) {
+					return {
+						startX: prevOpponent.x,
+						startY: prevOpponent.y,
+						endX: opponent.x,
+						endY: opponent.y,
+						startTime: Date.now(),
+						duration: ANIMATION_DURATION
+					};
+				}
+				return null;
+			});
 		}
 
 		function handleKeyDown(e) {
@@ -142,7 +386,6 @@
 					keys.right = true;
 					break;
 			}
-			sendMovement();
 		}
 
 		function handleKeyUp(e) {
@@ -163,16 +406,6 @@
 				case 'arrowright':
 					keys.right = false;
 					break;
-			}
-			sendMovement();
-		}
-
-		function sendMovement() {
-			if (websocket.readyState === WebSocket.OPEN) {
-				var msg = {
-					movement: keys
-				};
-				websocket.send(JSON.stringify(msg));
 			}
 		}
 	</script>
