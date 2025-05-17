@@ -8,5 +8,11 @@
   "devDependencies": {
     "typescript": "^4.0.0",
     "live-server": "^1.2.1"
-  }
+  },
+  "description": "",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
 }
