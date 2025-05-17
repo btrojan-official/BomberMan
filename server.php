@@ -1,25 +1,26 @@
 <?php
 require_once 'game.php';
 
-$host = 'localhost'; // moja domena w ct8.pl
-$port = 46089; // zarezerwowany w panelu port
+$host = 'localhost'; 
+$port = 46089;
 $transport = 'http';
 $server = stream_socket_server("tcp://localhost:46089", $errno, $errstr);
 if (!$server) {
     die("$errstr ($errno)");
 }
-$clients = array($server); // tablica klientów
+$clients = array($server); 
 $write  = NULL;
 $except = NULL;
 
 $game = new Game();
-$lastClientMessage = []; // Track last message time for each client
+$lastClientMessage = [];
 
 echo "Server is running on port: $port\n";
 
-// Add timer for opponent movement
 $lastOpponentMove = microtime(true);
-$opponentMoveInterval = 1; // Move opponents every 0.5 seconds
+$lastPingTime = microtime(true);
+$pingInterval = 5;
+$opponentMoveInterval = 1; 
 
 while (true) {
     $changed = $clients;
@@ -27,6 +28,17 @@ while (true) {
  
     // Check if it's time to move opponents
     $currentTime = microtime(true);
+
+    // Send ping frames every $pingInterval seconds
+    if ($currentTime - $lastPingTime >= $pingInterval) {
+        foreach ($clients as $client) {
+            if ($client !== $server) { // skip the server socket
+                send_ping($client);
+            }
+        }
+        $lastPingTime = $currentTime;
+    }
+
     if ($currentTime - $lastOpponentMove >= $opponentMoveInterval) {
         $game->moveOpponents();
         $lastOpponentMove = $currentTime;
@@ -62,42 +74,48 @@ while (true) {
         unset($changed[$found_socket]);
     }
 
-    foreach ($changed as $changed_socket) {   // wiadomość od klienta
-        print_r($changed_socket);
-      
+    foreach ($changed as $changed_socket) {
         $ip = stream_socket_get_name($changed_socket, true);
         $buffer = stream_get_contents($changed_socket);
-      
-        if ($buffer == false) {
+    
+        if ($buffer === false || $buffer === '') {
             echo "Client Disconnected from $ip\n";
             @fclose($changed_socket);
             $found_socket = array_search($changed_socket, $clients);
             unset($clients[$found_socket]);
-            unset($lastClientMessage[$ip]); // Clean up rate limiter data
+            unset($lastClientMessage[$ip]);
+            continue;
         }
-      
+    
         $unmasked = unmask($buffer);
-        if ($unmasked != "") {
+        if ($unmasked !== "") {
             $data = json_decode($unmasked, true);
+    
+            // Handle pong messages: ignore them
+            if (isset($data['type']) && $data['type'] === 'pong') {
+                continue;
+            }
+    
             if (isset($data['position'])) {
-                // Rate limiting - only process position updates every 0.1 seconds
-                if (!isset($lastClientMessage[$ip]) || ($currentTime - $lastClientMessage[$ip]) >= 0.1) {
+                if (!isset($lastClientMessage[$ip]) || ($currentTime - $lastClientMessage[$ip]) >= 0.2) {
                     $game->updatePlayerPosition($data['position']);
                     $lastClientMessage[$ip] = $currentTime;
+                    
+                    // Send position update back to all clients
+                    send_message($clients, mask(json_encode([
+                        "type" => "position_update",
+                        "position" => $data['position']
+                    ])));
                 }
             }
-            echo "\nReceived a Message from $ip:\n\"$unmasked\" \n";
-        }
-      
-        /*
-		    modyfikacja p. Mateusza Wojdy - przeciwdziała rozłączaniu serwera przy odświeżeniu strony przez innego klienta
-		    dziękuję
-	    */
-        if (!is_closing_frame($buffer)) {
-            $response = mask($unmasked);
-            send_message($clients, $response);
+    
+            if (!is_closing_frame($buffer)) {
+                $response = mask($unmasked);
+                send_message($clients, $response);
+            }
         }
     }
+    
 }
 fclose($server);
 
@@ -150,22 +168,30 @@ function handshake($client, $rcvd, $host, $port)
             $headers[$matches[1]] = $matches[2];
         }
     }
+    if (!isset($headers['Sec-WebSocket-Key'])) {
+        return false;
+    }
     $secKey = $headers['Sec-WebSocket-Key'];
     $secAccept = base64_encode(pack('H*', sha1($secKey . '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')));
-    //hand shaking header
-    $upgrade  = "HTTP/1.1 101 Web Socket Protocol Handshake\r\n" .
-        "Upgrade: websocket\r\n" .
-        "Connection: Upgrade\r\n" .
-        "WebSocket-Origin: $host\r\n" .
-        "WebSocket-Location: ssl://$host:$port\r\n" .
-        "Sec-WebSocket-Version: 13\r\n".
-        "Sec-WebSocket-Accept:$secAccept\r\n\r\n";
+    
+    $upgrade  = "HTTP/1.1 101 Switching Protocols\r\n" .
+                "Upgrade: websocket\r\n" .
+                "Connection: Upgrade\r\n" .
+                "Sec-WebSocket-Accept: $secAccept\r\n\r\n";
     fwrite($client, $upgrade);
 }
+
 
 function send_message($clients, $msg)
 {
     foreach ($clients as $changed_socket) {
-        @fwrite($changed_socket, $msg);
+        if (is_resource($changed_socket) && $changed_socket !== $clients[0]) { // Skip server socket
+            @fwrite($changed_socket, $msg);
+        }
     }
+}
+
+function send_ping($client) {
+    $ping_msg = json_encode(["type" => "ping"]);
+    @fwrite($client, mask($ping_msg));
 }
