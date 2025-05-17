@@ -1,0 +1,12 @@
+{
+  "name": "bomberman",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "start": "live-server"
+  },
+  "devDependencies": {
+    "typescript": "^4.0.0",
+    "live-server": "^1.2.1"
+  }
+}
