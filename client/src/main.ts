@@ -9,10 +9,10 @@ const ctx: CanvasRenderingContext2D = canvas.getContext('2d')!;
 const scalar: number = 1;
 const CELL_SIZE: number = 20 * scalar; // Size of each cell in pixels
 
-const WALL_COLORS: Record<number, string> = {
-  0: '#4CAF50', // Floor
-  1: '#795548', // Undestructable wall
-  2: '#8D6E63'  // Destructable wall
+const WALL_COLORS: Record<number, number> = {
+  0: 12*16, // Floor
+  1: 48,    // Undestructable wall
+  2: 64     // Destructable wall
 };
 
 interface Keys {
@@ -66,6 +66,9 @@ const ANIMATION_DURATION = 1000; // 1 second (was commented 0.5 seconds, so I ke
 const GAME_LOOP_INTERVAL = 10; // 10 times per second
 const POSITION_UPDATE_INTERVAL = 100; // Send position updates every 100ms
 let lastPositionUpdate: number = 0;
+
+const image = new Image();
+image.src = "https://localhost/BomberMan/BomberMan/client/assets/sprites.png";
 
 interface GameData {
   gameField: number[][];
@@ -333,10 +336,7 @@ function drawGame(): void {
   for (let i = 0; i < gameField.length; i++) {
     for (let j = 0; j < gameField[i].length; j++) {
       const cellType = gameField[i][j];
-      ctx.fillStyle = WALL_COLORS[cellType];
-      ctx.fillRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-      ctx.strokeStyle = '#000';
-      ctx.strokeRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+      ctx.drawImage(image, WALL_COLORS[cellType], 48, 16, 16, j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
   }
 
